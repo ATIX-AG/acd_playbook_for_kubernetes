@@ -1,0 +1,195 @@
+---
+
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: Wait for system to become reachable
+      wait_for_connection:
+        timeout: 300
+        sleep: 10
+
+# We gather facts after waiting as otherwise the wait step will fail if one host is not up.
+- hosts: all
+  gather_facts: true
+  tasks:
+    - name: Gather Facts
+      gather_facts:
+        parallel: true
+
+# Add Bootstrap node to controlplane group
+# Your kubectl admin config can be found on this node afterwards.
+- hosts: bootstrap
+  tasks:
+    - add_host:
+        name: "{{ inventory_hostname }}"
+        groups: controlplane
+      # Doesn't need to be tracked as this change is ephemeral on the ansible controller
+      changed_when: false
+
+# Define a cluster group from controlplane and worker nodes
+- hosts: controlplane:worker
+  tasks:
+    - add_host:
+        name: "{{ item }}"
+        groups: cluster
+      loop: "{{ ansible_play_hosts }}"
+      run_once: false
+      # Doesn't need to be tracked as this change is ephemeral on the ansible controller
+      changed_when: false
+
+- name: Set Cluster facts
+  hosts: cluster
+  tasks:
+    - name: Set bootstrap node fact
+      set_fact:
+        kube_bootstrap_host: "{{ groups['bootstrap'] | map('extract', hostvars, ['inventory_hostname'] ) | first }}"
+        cacheable: true
+
+    - name: Set HA-Proxy as controlplane endpoint fact
+      set_fact:
+        kube_controlplane_endpoint: "{{ groups['haproxy'] | map('extract', hostvars, ['ansible_facts', 'fqdn'] ) | first }}"
+        cacheable: true
+      when: "groups.haproxy is defined and groups['haproxy']|length != 0"  # otherwise the bootstrap node ip will be used.
+
+- hosts: all
+  tasks:
+    - name: Set CNI fact
+      set_fact:
+        kube_network_plugin: "{{ groups['bootstrap'] | map('extract', hostvars, ['kube_network_plugin'] ) | first }}"
+        cacheable: true
+
+- hosts: all
+  tasks:
+    - debug:
+        var: kube_network_plugin
+        verbosity: 1
+
+- name: Apply Firewall rules
+  hosts: all
+  tasks:
+    - name: Allow TCP
+      ufw:
+        proto: "tcp"
+        port: "{{ item }}"
+        rule: "allow"
+      with_items: "{{ firewall_allow_tcp.split(',') | difference(['']) }}"
+
+    - name: Allow UDP
+      ufw:
+        proto: "udp"
+        port: "{{ item }}"
+        rule: "allow"
+      with_items: "{{ firewall_allow_udp.split(',') | difference(['']) }}"
+
+    - name: Allow in-cluster communication
+      ufw:
+        rule: allow
+        src: "{{ hostvars[item]['ansible_facts']['default_ipv4']['address'] }}"
+        proto: any
+      with_items: "{{ groups['cluster'] }}"
+
+    - name: Allow BGP in-cluster communication (Cilium)
+      ufw:
+        rule: allow
+        src: "10.0.0.0/8"
+        proto: any
+      when: 'kube_network_plugin == "cilium"'
+
+    - name: Enable Firewall
+      ufw:
+        state: enabled
+        policy: reject
+
+- name: Create Proxy Backend Host List
+  hosts: haproxy
+  tasks:
+    - set_fact:
+        haproxy_backend_servers: "{{ haproxy_backend_servers|default([]) + [{'name': item, 'address': item+':6443'} ] }}"
+      with_items: "{{ groups['controlplane'] }}"
+
+
+- name: Setup HA-Proxy
+  hosts: haproxy
+  roles:
+    - role: geerlingguy.haproxy
+  vars:
+    haproxy_frontend_name: 'kube-api'
+    haproxy_frontend_bind_address: '*'
+    haproxy_frontend_port: 6443
+    haproxy_frontend_mode: 'tcp'
+
+    haproxy_backend_name: 'kube-api-backend'
+    haproxy_backend_mode: 'tcp'
+    haproxy_backend_httpchk: ''
+    haproxy_backend_balance_method: 'roundrobin'
+    haproxy_connect_timeout: 5000
+    haproxy_client_timeout: 50000
+    haproxy_server_timeout: 50000
+
+- name: Install containerd
+  hosts: cluster
+  roles:
+    - role: geerlingguy.containerd
+
+
+- name: Bootstrap controlplane
+  hosts: bootstrap
+  roles:
+    - role: kubernetes-node
+      kube_node_role: "bootstrap"
+
+
+- name: Join Controlplane Nodes to Cluster
+  hosts: controlplane:!bootstrap
+  roles:
+    - role: kubernetes-node
+      kube_node_role: "controlplane"
+      kube_certificate_key: "{{ hostvars[kube_bootstrap_host]['kube_certificate_key'] }}"
+      kube_kubeadm_join_command: "{{ hostvars[kube_bootstrap_host]['kube_kubeadm_join_command'] }}"
+
+
+- name: Join Worker Nodes to Cluster
+  hosts: worker
+  roles:
+    - role: kubernetes-node
+      kube_node_role: "worker"
+      kube_kubeadm_join_command: "{{ hostvars[kube_bootstrap_host]['kube_kubeadm_join_command'] }}"
+
+
+- name: Setup Kubernetes Dashboard
+  hosts: bootstrap
+  run_once: true
+  vars:
+    configuration_files:
+      - dashboard.yaml
+      - admin-svc.yaml
+  tasks:
+    - block:
+      - copy:
+          src: "{{ item }}"
+          dest: "/tmp/{{ item }}"
+        changed_when: false
+        with_items: "{{ configuration_files }}"
+
+      - shell: |
+          kubectl apply -f /tmp/{{ item }}
+        with_items: "{{ configuration_files }}"
+        register: kubectl
+        changed_when: '"configured" in kubectl.stdout'
+
+      always:
+      - file:
+          path: "/tmp/{{ item }}"
+          state: absent
+        with_items: "{{ configuration_files }}"
+        changed_when: false
+      when: setup_dashboard|bool
+
+
+# Inform administrator about or choice, so they can easily access the kubernetes admin configuration file.
+- hosts: bootstrap
+  tasks:
+    - debug:
+        msg: "{{ inventory_hostname }} has been chosen as the bootstrap node"
+        verbosity: 0
+...

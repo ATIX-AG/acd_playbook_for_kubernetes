@@ -1,0 +1,31 @@
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+{% if kube_kubeadm_config.init_configuration|length > 0 %}
+{{ kube_kubeadm_config.init_configuration | to_nice_yaml }}
+{% endif %}
+---
+kind: ClusterConfiguration
+apiVersion: kubeadm.k8s.io/v1beta3
+{% if kube_kubeadm_config.cluster_configuration|length > 0 %}
+{{ kube_kubeadm_config.cluster_configuration | to_nice_yaml }}
+{% endif %}
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+{% if kube_kubeadm_config.kubelet_configuration|length > 0 %}
+{{ kube_kubeadm_config.kubelet_configuration | to_nice_yaml }}
+{% endif %}
+---
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+{% if kube_kubeadm_config.proxy_configuration|length > 0 %}
+{{ kube_kubeadm_config.proxy_configuration | to_nice_yaml }}
+{% endif %}
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: JoinConfiguration
+{% if kube_kubeadm_config.join_configuration|length > 0 %}
+{{ kube_kubeadm_config.join_configuration | to_nice_yaml }}
+{% endif %}
+...

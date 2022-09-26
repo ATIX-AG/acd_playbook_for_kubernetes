@@ -1,0 +1,83 @@
+---
+- name: Disable swap for current session
+  command: "swapoff -a"
+  changed_when: false
+
+- name: Disable swap permanently, persist reboots
+  replace:
+    path: "/etc/fstab"
+    regexp: '^(\s*)([^#\n]+\s+)(\w+\s+)swap(\s+.*)$'
+    replace: '#\1\2\3swap\4'
+
+- name: Enable br_netfilter
+  lineinfile:
+    create: true
+    path: "/etc/modules-load.d/k8s.conf"
+    line: "br_netfilter"
+    state: "present"
+
+- name: Load br_netfilter
+  modprobe:
+    name: "br_netfilter"
+    state: "present"
+
+- name: Let iptables see bridged traffic
+  sysctl:
+    name: "{{ item }}"
+    value: '1'
+    state: "present"
+  loop:
+    - net.bridge.bridge-nf-call-iptables
+    - net.bridge.bridge-nf-call-ip6tables
+    - net.ipv4.ip_forward
+
+- name: Create the directory for NetworkManager config
+  file:
+    path: "/etc/NetworkManager/conf.d"
+    state: "directory"
+
+- name: Configure NetworkManager
+  template:
+    src: "networkmanager-calico.conf.j2"
+    dest: "/etc/NetworkManager/conf.d/calico.conf"
+
+- name: Install dependencies
+  apt:
+    name:
+      - "apt-transport-https"
+      - "ca-certificates"
+      - "curl"
+      - "gnupg2"
+      - "software-properties-common"
+    state: "present"
+
+- name: Add Kubernetes apt key
+  apt_key:
+    url: "https://packages.cloud.google.com/apt/doc/apt-key.gpg"
+    state: "present"
+
+- name: Add Kubernetes repo
+  apt_repository:
+    repo: "deb http://apt.kubernetes.io/ kubernetes-xenial main"
+    state: present
+    update_cache: true
+
+- name: Add Kubernetes apt preferences file to pin versions
+  template:
+    src: apt-preferences-kubernetes.j2
+    dest: /etc/apt/preferences.d/kubernetes
+    mode: 0644
+
+- name: Install kubeadm, kubelet, and kubectl
+  apt:
+    name:
+      - kubelet
+      - kubectl
+      - kubeadm
+    state: present
+
+- name: Ensure kubelet is started and enabled
+  service:
+    name: kubelet
+    state: started
+    enabled: true

@@ -1,0 +1,28 @@
+---
+- name: Obtain Cilium CLI Installer
+  ansible.builtin.get_url:
+    dest: "/tmp/cilium-linux-amd64.tar.gz"
+    url: "https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz"
+    checksum: "sha256:https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz.sha256sum"
+
+- name: Install Cilium CLI
+  ansible.builtin.unarchive:
+    src: "/tmp/cilium-linux-amd64.tar.gz"
+    dest: "/usr/local/bin"
+    remote_src: true
+
+- name: Check CNI Status
+  ansible.builtin.shell: |
+    cilium status | grep "daemonsets.apps \"cilium\" not found"
+  register: cilium_status
+  failed_when: "cilium_status.rc not in [0, 1]"
+
+- debug:
+    var: cilium_status.stdout
+    verbosity: 0
+
+- name: Install Cilium CNI
+  ansible.builtin.command:
+    cmd: "cilium install"
+  when: 'cilium_status.rc == 0'
+...

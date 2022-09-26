@@ -1,0 +1,16 @@
+---
+- name: Create the directory for the calico kustomization
+  file:
+    path: "/etc/kubernetes/calico"
+    state: directory
+
+- name: Deploy the calico kustomization file
+  template:
+    src: "calico-kustomization.yaml.j2"
+    dest: "/etc/kubernetes/calico/kustomization.yaml"
+
+- name: Configure Calico networking.
+  command: "kubectl apply -k /etc/kubernetes/calico"
+  register: kube_calico_result
+  changed_when: "'created' in kube_calico_result.stdout"
+...

@@ -1,0 +1,30 @@
+---
+kube_version: '1.23'
+
+kube_node_role: "bootstrap"
+
+kube_kubeadm_init_extra_opts: ""
+kube_kubeadm_join_extra_opts: ""
+
+kube_controlplane_endpoint: "{{ ansible_host }}:6443"
+kube_advertise_address: "{{ ansible_default_ipv4.address }}"
+
+kube_pod_network_cidr: "192.168.0.0/16"
+
+kube_kubeadm_config:
+  init_configuration:
+    localAPIEndpoint:
+      advertiseAddress: "{{ kube_advertise_address }}"
+    certificateKey: "{{ kube_certificate_key }}"
+  cluster_configuration:
+    networking:
+      podSubnet: "{{ kube_pod_network_cidr }}"
+    kubernetesVersion: "stable-{{ kube_version }}"
+    controlPlaneEndpoint: "{{ kube_controlplane_endpoint }}"
+  kubelet_configuration:
+    cgroupDriver: "systemd"
+  proxy_configuration: {}
+  join_configuration:
+    certificateKey: "{{ kube_certificate_key }}"
+
+kube_calico_manifest_file: "https://docs.projectcalico.org/archive/v3.21/manifests/calico.yaml"

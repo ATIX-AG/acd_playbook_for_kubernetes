@@ -1,0 +1,24 @@
+---
+- include_tasks: common.yaml
+
+- include_tasks: bootstrap.yaml
+  when: kube_node_role == "bootstrap"
+
+- name: Join controlplane node to Cluster
+  command: >-
+    {{ kube_kubeadm_join_command }}
+    {{ kube_kubeadm_join_extra_opts }}
+    --control-plane
+    --certificate-key {{ kube_certificate_key }}
+  args:
+    creates: /etc/kubernetes/kubelet.conf
+  when: kube_node_role == "controlplane"
+
+- name: Join worker node to Cluster
+  command: >-
+    {{ kube_kubeadm_join_command }}
+    {{ kube_kubeadm_join_extra_opts }}
+  args:
+    creates: /etc/kubernetes/kubelet.conf
+  when: kube_node_role == "worker"
+...

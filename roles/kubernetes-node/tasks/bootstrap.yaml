@@ -1,0 +1,96 @@
+---
+- name: Create directory for kubernetes configuration
+  file:
+    path: "/etc/kubernetes"
+    state: directory
+
+- name: Create a certificate-key if it does not exist already
+  shell: "kubeadm certs certificate-key > /etc/kubernetes/certificate-key"
+  args:
+    creates: "/etc/kubernetes/certificate-key"
+
+- name: Restrict access to certificate-key
+  file:
+    path: "/etc/kubernetes/certificate-key"
+    owner: "root"
+    group: "root"
+    mode: "0600"
+
+- name: Read certificate-key
+  slurp:
+    src: "/etc/kubernetes/certificate-key"
+  register: kube_certificate_key_result
+  when: kube_certificate_key is undefined
+
+- name: Set the certificate-key as a host fact
+  set_fact:
+    kube_certificate_key: "{{ kube_certificate_key_result.content | b64decode | trim }}"
+  when: kube_certificate_key is undefined
+
+- name: Deploy config-file for kubeadm and kubelet
+  template:
+    src: "kubeadm-config.yaml.j2"
+    dest: "/etc/kubernetes/kubeadm-config.yaml"
+    mode: "0600"
+
+- name: Check if Kubernetes is initialized already
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: kube_admin_conf
+
+- name: Bootstrap the controlplane with kubeadm init
+  command: >-
+    kubeadm init
+    --config /etc/kubernetes/kubeadm-config.yaml
+    {{ kube_kubeadm_init_extra_opts }}
+  register: kube_kubeadm_init_result
+  when: not kube_admin_conf.stat.exists
+
+- name: Print the output of kubeadm init
+  debug:
+    var: kube_kubeadm_init_result.stdout
+    verbosity: 2
+  when: not kube_admin_conf.stat.exists
+
+- name: Upload controlplane certs to the cluster
+  command: "kubeadm init phase upload-certs --upload-certs \
+            --config=/etc/kubernetes/kubeadm-config.yaml"
+  changed_when: false
+
+- name: Get the kubeadm join command
+  command: kubeadm token create --print-join-command
+  changed_when: false
+  register: kube_kubeadm_join_command_result
+
+- name: Print join command
+  debug:
+    var: kube_kubeadm_join_command_result.stdout
+    verbosity: 2
+  when: kube_kubeadm_join_command_result.stdout is defined
+
+- name: Set the kubeadm join command as a host fact
+  set_fact:
+    kube_kubeadm_join_command: >-
+      {{ kube_kubeadm_join_command_result.stdout }}
+      {{ kube_kubeadm_join_extra_opts }}
+  when: kube_kubeadm_join_command_result.stdout is defined
+
+- name: Create .kube directory
+  file:
+    path: ~/.kube
+    state: directory
+    mode: 0755
+
+- name: Create symlink to admin.conf at ~/.kube/config
+  file:
+    src: /etc/kubernetes/admin.conf
+    dest: ~/.kube/config
+    state: link
+    mode: 0600
+
+- debug:
+    var: kube_network_plugin
+    verbosity: 0
+
+- include_tasks: "network_{{ kube_network_plugin }}.yaml"
+...

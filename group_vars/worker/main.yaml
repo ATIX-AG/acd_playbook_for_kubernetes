@@ -1,0 +1,4 @@
+---
+firewall_allow_tcp: "22,80,443"
+firewall_allow_udp: ""
+...

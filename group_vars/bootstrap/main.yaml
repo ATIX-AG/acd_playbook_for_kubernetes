@@ -1,0 +1,4 @@
+---
+setup_dashboard: false
+kube_network_plugin: "cilium"
+...

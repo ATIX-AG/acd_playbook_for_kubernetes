@@ -1,0 +1,20 @@
+---
+stages:
+  - lint
+
+yaml:
+  stage: lint
+  image: ${CI_REGISTRY}/hub/lint/yaml:main
+  tags:
+    - docker
+  script:
+    - yamllint -s .
+
+ansible:
+  stage: lint
+  image: ${CI_REGISTRY}/hub/orchansible_container:main
+  tags:
+    - docker
+  script:
+    - ansible-lint -vvvvv .
+...
