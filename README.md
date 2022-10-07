@@ -13,7 +13,7 @@ The firewall is configured to allow all in-cluster communication as well as inbo
 This playbook currently expects hosts to run on Ubuntu 20.04.
 
 ## Architecture
-![](./architecture.svg)
+![](./architecture.png)
 
 A minimal Kubernetes cluster would consist of a bootstrap node as well as a single worker node and no proxy.
 In general, a cluster should consist of as many workers as needed, a proxy node for the API and bootstrap+controlplane
